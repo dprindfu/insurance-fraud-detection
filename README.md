@@ -38,7 +38,7 @@ The `outputs/` folder has:
 ## Running it
 
 ```bash
-git clone https://github.com/[your-username]/insurance-fraud-detection.git
+git clone https://github.com/dprindfu/insurance-fraud-detection.git
 cd insurance-fraud-detection
 pip install -r requirements.txt
 jupyter notebook fraud_detection.ipynb
