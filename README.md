@@ -1,54 +1,43 @@
 # Vehicle Insurance Fraud Detection
 
-Built a model to flag fraudulent vehicle insurance claims before they get paid out. The idea is straightforward - every fraud claim that slips through costs ~$15K on average, but investigating a flagged claim only costs ~$250, so even a decent model saves a lot of money.
+Binary classifier that ranks vehicle insurance claims by fraud risk, plus a cost analysis to pick a decision threshold.
+Built for the NEXIS Student Research Club at Syracuse University (Python, scikit-learn, XGBoost).
 
-## What this project does
+- data: [Kaggle vehicle claim fraud dataset](https://www.kaggle.com/datasets/shivamb/vehicle-claim-fraud-detection) - 15,420 claims from 1994-96, ~6% fraud
+- split: 70/30, with all model + threshold decisions made on the training set (5-fold CV) and the test set scored once
+- notebook: `fraud_detection.ipynb`
 
-Uses XGBoost on the [Kaggle Vehicle Claim Fraud Detection dataset](https://www.kaggle.com/datasets/shivamb/vehicle-claim-fraud-detection) (~15K claims) to predict which claims are fraudulent. The model outputs a probability score per claim, and I pick a threshold (0.7) that balances catching fraud against not drowning the investigations team in false alarms.
+## Results (test set: 4,626 claims, 277 fraud)
 
-## Results
+If investigators can only review the riskiest claims:
 
-At threshold 0.7:
-- **ROC AUC: 0.882**
-- Catches **55.2%** of fraud, **8.3%** false alarm rate
-- Estimated **$2.17M in annual savings** versus just paying out every claim
+| Claims reviewed (highest risk first) | Fraud caught | Lift over random review |
+|---|---|---|
+| Top 5% | 23.1% | 4.6x |
+| Top 10% | 39.7% | 4.0x |
+| Top 20% | 62.8% | 3.1x |
 
-55% detection might sound low, but at this threshold the model is quite precise about what it does flag - and each caught case saves $15K. The cost math works out heavily in favor of deploying it.
+Test AUC is 0.842. With only 277 fraud cases these numbers move around a bit - the top-10% lift is roughly 3.5x to 4.5x.
 
-Top features were policy type (sedan liability), fault party, and base policy type. Basically: liability-heavy policies where a third party is at fault are the biggest fraud signal, which makes sense if you think about how staged accident schemes work.
+**On a later year it does worse.** Trained on 1994-95 and tested on 1996, AUC drops to 0.759 and the top 10% of claims catches 17.4% of fraud (1.7x lift). The split above mixes all three years together, so treat it as the optimistic number.
 
-## How I got here
+![ROC and threshold tradeoff](outputs/roc_curve.png)
 
-Started by trying Random Forest, Logistic Regression, Gradient Boosting, and XGBoost. XGBoost won on AUC.
+**Cost view:** the cheapest threshold (0.2) catches 96.4% of fraud but flags 46.8% of claims, saving $3.46M on the test set vs. paying every fraud claim. Under my cost assumptions, though, just investigating *every* claim saves about $3.0M, so the model only adds ~$0.46M. Its real value is **ranking** claims when review capacity is limited.
 
-The class imbalance (~6% fraud) was the main challenge. I initially used SMOTE to oversample the minority class, but it was overfitting pretty badly. Switched to XGBoost's built-in `scale_pos_weight` parameter instead, which gave much cleaner generalization - train/test AUC gap came down to 0.063.
+XGBoost, hist gradient boosting, and random forest all scored about the same in cross-validation, so I kept XGBoost. Top features: liability base policy, sedan liability policy type, fault, and recent address change.
 
-Tuned hyperparameters with GridSearchCV over tree depth, regularization strength, learning rate, and subsampling. Added fairly aggressive regularization (`reg_alpha=2`, `reg_lambda=2`, `min_child_weight=20`) to keep the model honest.
+![Feature importance](outputs/feature_importance.png)
 
-For the threshold, I evaluated 0.1 through 0.5 on recall vs. false alarm rate, then built a cost model to pick the sweet spot. 0.7 minimizes total expected cost given the $15K/$250 asymmetry.
+## Problems I found and fixed
 
-## Visuals
+- **Row ID leak:** `PolicyNumber` is just a row number, and the file is in time order. Leaving it in raised CV AUC from 0.827 to 0.874, so I dropped it. An earlier version kept it and reported ~0.88 test AUC, which was too high.
+- **Unfair comparison:** the other models used SMOTE and XGBoost didn't. Now they all use class weights.
+- **Accuracy:** calling every claim legit is already 94.0% accurate, so I report lift, recall, and precision instead.
+- **Test set:** I first picked the model and threshold by looking at test results. Now that all comes from the training set.
 
-The `outputs/` folder has:
-- ROC curve with the 0.7 threshold marked
-- Confusion matrix with counts and percentages
-- Cost comparison bar chart (with vs. without model)
-- Top 10 feature importances
+## Assumptions + limitations
 
-## Running it
-
-```bash
-git clone https://github.com/dprindfu/insurance-fraud-detection.git
-cd insurance-fraud-detection
-pip install -r requirements.txt
-jupyter notebook fraud_detection.ipynb
-```
-
-Needs Python 3.x, scikit-learn, XGBoost, imbalanced-learn, pandas, numpy, matplotlib, seaborn, kagglehub. The dataset downloads automatically via kagglehub when you run the notebook.
-
-## Things I'd improve
-
-- SHAP values instead of just feature importances - importances don't capture interaction effects
-- Calibration curve to check if the predicted probabilities are actually reliable at the extremes
-- Sensitivity analysis on the cost assumptions - how much does the savings estimate move if average fraud is $12K or $20K?
-- Temporal validation split to check for distribution drift
+- the $15K average fraud payout and $250 per investigation are **assumptions** - the data has no claim amounts
+- savings assume every investigated fraud claim gets stopped, and they're test-set figures, not annual
+- the data is from 1994-96, so this is a methods project, not a production fraud system
